@@ -29,7 +29,7 @@ gevent==24.11.1
 gevent-websocket==0.10.1
 
 # === Monitoring (production) ===
-sentry-sdk[flask]==1.40.0
+sentry-sdk[flask]==1.45.1
 
 # === Testing (dev only — see requirements-dev.txt) ===
 # pytest==7.4.3
