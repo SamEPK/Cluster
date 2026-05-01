@@ -1,0 +1,21 @@
+# =============================================================================
+# ConfigMap "backend-config" - variables d'env NON sensibles du backend
+# =============================================================================
+# Tout ce qui n'est pas un mot de passe va ici. Les passwords/tokens vont
+# dans le Secret "lottoti-secrets".
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config                  # Reference dans le Deployment via configMapRef
+  namespace: lottoti
+data:                                   # Toutes les valeurs sont des STRINGS
+  FLASK_ENV: production                 # Mode Flask (production/development)
+  PORT: "5000"                          # Port d'ecoute Gunicorn (string : "5000" not 5000)
+  LOG_LEVEL: info                       # Verbosite des logs (debug, info, warning, error)
+  FRONTEND_URL: https://lottoti.local   # URL du frontend (utilisee pour les liens email)
+  CORS_ORIGINS: https://lottoti.local   # Origines autorisees pour CORS (multi-origins separes par virgule)
+  # Backend lit DATABASE_URL et REDIS_URL via les services + secrets
+  SEED_DB: "false"                      # true au 1er deploy pour seeder la DB, puis false
+  # Sentry optionnel (laisse vide pour desactiver)
+  SENTRY_DSN: ""                        # Si non-vide, envoie les erreurs a Sentry

@@ -1,0 +1,136 @@
+# ============================================================
+# LottoTi — Full Stack Docker Compose (Production)
+# Services: Frontend, Backend API, PostgreSQL, Redis, Nginx
+# Usage: docker-compose up -d
+# ============================================================
+
+services:
+  # --- Next.js Frontend ---
+  frontend:
+    build:
+      context: ./lottoit
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "http://api:5000"
+        NEXT_PUBLIC_SOCKET_URL: "http://api:5000"
+    container_name: lottoit-frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # --- Flask API Backend ---
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lottoit-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - FLASK_ENV=production
+      - DATABASE_URL=postgresql://lottoit:${POSTGRES_PASSWORD}@db:5432/lottoit
+      - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost}
+    volumes:
+      - uploads:/app/uploads
+      - logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # --- PostgreSQL 16 ---
+  db:
+    image: postgres:16-alpine
+    container_name: lottoit-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lottoit
+      POSTGRES_USER: lottoit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lottoit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+        -c shared_buffers=256MB
+        -c effective_cache_size=768MB
+        -c work_mem=8MB
+        -c maintenance_work_mem=128MB
+        -c max_connections=100
+        -c log_min_duration_statement=500
+
+  # --- Redis 7 (cache + sessions + rate limiting) ---
+  redis:
+    image: redis:7-alpine
+    container_name: lottoit-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redisdata:/data
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # --- Nginx Reverse Proxy ---
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: lottoit-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - uploads:/app/uploads:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      - app
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  uploads:
+    driver: local
+  logs:
+    driver: local
+
+networks:
+  app:
+    driver: bridge

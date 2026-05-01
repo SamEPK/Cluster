@@ -1,0 +1,28 @@
+# =============================================================================
+# HPA Frontend - Bonus 5 (+1 pt)
+# =============================================================================
+# Scale automatique du frontend de 3 a 10 selon la charge CPU.
+# =============================================================================
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend                        # Meme nom que le Deployment cible
+  namespace: lottoti
+  labels:
+    app: frontend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend                      # Cible le Deployment frontend
+  minReplicas: 3                        # Jamais moins de 3 (exigence PDF)
+  maxReplicas: 10                       # Max 10 sous gros pic de trafic
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75        # Si CPU moyen > 75%, ajoute des pods
+                                        # (Next.js consomme peu de RAM, on cible le CPU)

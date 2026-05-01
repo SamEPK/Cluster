@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Le namespace est cree par 00-namespaces; ne PAS l'inclure ici car
+# certaines ressources (ClusterIssuer) sont cluster-scoped.
+# 15-cert-manager est applique APRES install de cert-manager (script 04).
+resources:
+  - 00-namespaces
+  - 20-database
+  - 25-redis
+  - 30-backend
+  - 40-frontend
+  - 50-ingress
+  - 60-policies
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: lottoti
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

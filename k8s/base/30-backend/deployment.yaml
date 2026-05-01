@@ -1,0 +1,210 @@
+# =============================================================================
+# DEPLOYMENT Backend (Flask) - 2 replicas (exigence PDF section 3.2.4)
+# =============================================================================
+# Pourquoi Deployment (et pas StatefulSet) ?
+#  - Le backend Flask est STATELESS : chaque pod fait la meme chose
+#  - Pas besoin d'identite stable, on veut juste N copies identiques
+#  - Avec uploads en RWX, les pods peuvent meme partager le stockage
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend                         # Nom du Deployment
+  namespace: lottoti
+  labels:                               # Labels du Deployment lui-meme
+    app: backend
+    tier: backend
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: lottoti
+spec:
+  replicas: 2                           # === EXIGENCE PDF : minimum 2 backend replicas ===
+  revisionHistoryLimit: 5               # Garde 5 anciennes ReplicaSets pour rollback
+
+  # === BONUS 4 : Rolling Update avec zero downtime ===
+  strategy:
+    type: RollingUpdate                 # Default, mais explicite pour la lisibilite
+    rollingUpdate:
+      maxSurge: 1                       # Pendant la maj : on peut creer +1 pod en plus (3 total)
+      maxUnavailable: 0                 # JAMAIS moins que les 2 actuels = ZERO downtime
+
+  selector:                             # Le Deployment gere les pods avec ces labels
+    matchLabels:
+      app: backend                      # DOIT matcher template.metadata.labels
+
+  template:                             # Template du pod
+    metadata:
+      labels:                           # Labels appliques aux pods (utilises par Service + NetworkPolicy)
+        app: backend
+        tier: backend
+    spec:
+      # === Affinity : preferences de placement ===
+      affinity:
+        # Preferer les workers labellises lottoti.io/role=app
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:  # SOFT (preference, pas obligation)
+            - weight: 100                                    # Poids de la preference (max 100)
+              preference:
+                matchExpressions:
+                  - key: lottoti.io/role
+                    operator: In
+                    values: ["app"]
+
+        # Eviter de mettre les 2 backend pods sur le meme node (HA)
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:  # SOFT (sinon imposible si 1 seul node)
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: backend                            # Eviter d'autres pods avec ce label
+                topologyKey: kubernetes.io/hostname         # "Eviter sur le meme HOSTNAME"
+
+      terminationGracePeriodSeconds: 30  # 30s pour finir les requetes avant SIGKILL
+
+      # === initContainers : tournent AVANT les containers principaux ===
+      # Equivalent du `depends_on` Docker Compose, mais bloquant.
+      # Le pod attend que ces init terminent avant de lancer "api".
+      initContainers:
+        # Init 1 : attendre que Postgres soit pret
+        - name: wait-for-db
+          image: postgres:16-alpine     # Image qui contient pg_isready
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |                         # Script bash multi-ligne
+              echo "Waiting for postgres..."
+              until pg_isready -h postgres -p 5432 -U lottoit; do
+                sleep 2
+              done
+              echo "postgres ready"
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}    # Tres petit, juste pour le check
+            limits:   {cpu: 100m, memory: 64Mi}
+
+        # Init 2 : attendre que Redis soit pret
+        - name: wait-for-redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for redis..."
+              until redis-cli -h redis ping | grep -q PONG; do
+                sleep 2
+              done
+              echo "redis ready"
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits:   {cpu: 100m, memory: 32Mi}
+
+      # === containers : les conteneurs principaux du pod ===
+      containers:
+        - name: api                     # Nom du container (vu dans kubectl logs api)
+          image: lottoti/backend:1.0.0  # Image Flask buildee localement et importee dans k3s
+          imagePullPolicy: IfNotPresent # Pas besoin de pull si image deja en local
+
+          ports:
+            - name: http
+              containerPort: 5000       # Port ecoute par Gunicorn
+
+          # === Variables d'env DEPUIS le ConfigMap ===
+          envFrom:
+            - configMapRef:
+                name: backend-config    # Charge TOUTES les cles du ConfigMap d'un coup
+
+          # === Variables d'env individuelles (depuis Secret) ===
+          env:
+            - name: POSTGRES_PASSWORD   # Recupere depuis le Secret
+              valueFrom:
+                secretKeyRef:
+                  name: lottoti-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL        # Construit avec interpolation $(VAR)
+              # Note : $(POSTGRES_PASSWORD) reference la variable env declaree ci-dessus
+              value: "postgresql://lottoit:$(POSTGRES_PASSWORD)@postgres.lottoti.svc.cluster.local:5432/lottoit"
+            - name: REDIS_URL           # URL Redis (pas de password configure)
+              value: "redis://redis.lottoti.svc.cluster.local:6379/0"
+            - name: FLASK_SECRET_KEY    # Cle Flask (sessions cookies signees)
+              valueFrom:
+                secretKeyRef:
+                  name: lottoti-secrets
+                  key: FLASK_SECRET_KEY
+            - name: JWT_SECRET_KEY      # Cle pour signer les JWT (auth)
+              valueFrom:
+                secretKeyRef:
+                  name: lottoti-secrets
+                  key: JWT_SECRET_KEY
+            - name: STRIPE_SECRET_KEY   # Cle API Stripe (paiements)
+              valueFrom:
+                secretKeyRef:
+                  name: lottoti-secrets
+                  key: STRIPE_SECRET_KEY
+            - name: STRIPE_WEBHOOK_SECRET   # Cle de validation des webhooks Stripe
+              valueFrom:
+                secretKeyRef:
+                  name: lottoti-secrets
+                  key: STRIPE_WEBHOOK_SECRET
+
+          # === Volumes montes dans le container ===
+          volumeMounts:
+            - name: uploads             # PVC partage entre les pods (RWX)
+              mountPath: /app/uploads   # Flask ecrit les photos ici
+            - name: logs                # emptyDir : logs ephemeres
+              mountPath: /app/logs
+
+          # === BONUS 1 : Resources (QoS Burstable) ===
+          resources:
+            requests:                   # Reserve garantie
+              cpu: 200m                 # 0.2 CPU
+              memory: 384Mi             # 384 Mio
+            limits:                     # Maximum tolere
+              cpu: "1"                  # 1 CPU
+              memory: 768Mi             # 768 Mio (kill si OOM)
+
+          # === startupProbe : tolerance pendant le boot (migrations DB) ===
+          startupProbe:
+            httpGet:
+              path: /api/health         # Endpoint de healthcheck Flask
+              port: 5000
+            periodSeconds: 5            # Verifie toutes les 5s
+            failureThreshold: 30        # 30 * 5s = 150s de tolerance au demarrage
+
+          # === livenessProbe : redemarre le pod si echec ===
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3         # 3 echecs = restart
+
+          # === readinessProbe : retire du LB si echec (mais garde le pod) ===
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # === Lifecycle hooks : preStop avant SIGTERM ===
+          # K8s envoie SIGTERM, attend grace period, puis SIGKILL.
+          # preStop = "execute ca AVANT SIGTERM" = laisser le temps a Gunicorn
+          # de finir les requetes en cours.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]  # 5s de grace pour les WebSockets
+
+      # === Volumes du POD ===
+      volumes:
+        - name: uploads                 # Reference utilisee dans volumeMounts
+          persistentVolumeClaim:
+            claimName: uploads          # Le PVC defini dans pvc-uploads.yaml
+        - name: logs
+          emptyDir: {}                  # Volume ephemere : disparait avec le pod
+                                        # OK car les logs sont aussi sur stdout (-> kubectl logs)

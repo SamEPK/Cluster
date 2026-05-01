@@ -1,0 +1,37 @@
+# =============================================================================
+# SERVICES Redis - meme principe que Postgres (headless + classique)
+# =============================================================================
+---
+# === Service headless (pour le StatefulSet) ===
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless                  # DNS individuel : redis-0.redis-headless.lottoti.svc
+  namespace: lottoti
+  labels:
+    app: redis
+spec:
+  clusterIP: None                       # Headless : DNS resout vers les IPs des pods
+  selector:
+    app: redis                          # Pointe vers les pods avec app=redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+# === Service classique - utilise par le backend (REDIS_URL) ===
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis                           # DNS court : redis.lottoti.svc
+  namespace: lottoti
+  labels:
+    app: redis
+spec:
+  type: ClusterIP                       # IP virtuelle interne
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379                        # Port standard Redis
+      targetPort: 6379

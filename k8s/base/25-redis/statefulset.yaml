@@ -1,0 +1,94 @@
+# =============================================================================
+# STATEFULSET Redis
+# =============================================================================
+# Redis aussi en StatefulSet pour avoir un PVC dedie qui persiste l'AOF.
+# AOF = Append-Only File : journal des operations Redis (durabilite).
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis                           # Pods seront : redis-0
+  namespace: lottoti
+  labels:
+    app: redis
+    tier: cache
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: lottoti
+spec:
+  serviceName: redis-headless           # Doit matcher le service headless
+  replicas: 1                           # 1 replica suffit (pas de cluster Redis ici)
+  selector:
+    matchLabels:
+      app: redis                        # DOIT matcher template.metadata.labels
+  template:
+    metadata:
+      labels:
+        app: redis                      # Label utilise par les Services et NetworkPolicies
+        tier: cache
+    spec:
+      affinity:                         # Pin Redis sur worker labellise storage=true
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: storage
+                    operator: In
+                    values: ["true"]
+      containers:
+        - name: redis                   # Nom du conteneur
+          image: redis:7-alpine         # Image officielle Redis 7 (legere, ~30 MB)
+          imagePullPolicy: IfNotPresent
+
+          # === Commande personnalisee ===
+          # Override du CMD par defaut pour configurer Redis
+          command:
+            - redis-server              # Binaire serveur
+            - --maxmemory               # Limite memoire interne Redis
+            - 128mb
+            - --maxmemory-policy        # Eviction si maxmemory atteint
+            - allkeys-lru               # LRU sur toutes les cles (cache classique)
+            - --appendonly              # Active l'AOF (persistance)
+            - "yes"
+
+          ports:
+            - name: redis
+              containerPort: 6379       # Port standard Redis
+
+          # === Volume pour l'AOF (persistance) ===
+          volumeMounts:
+            - name: redisdata           # Match le volumeClaimTemplate ci-dessous
+              mountPath: /data          # Redis ecrit AOF dans /data par defaut
+
+          # === BONUS : QoS Burstable (requests != limits) ===
+          resources:
+            requests:
+              cpu: 50m                  # 0.05 CPU minimum
+              memory: 64Mi              # 64 Mio reserves
+            limits:
+              cpu: 250m                 # 0.25 CPU max
+              memory: 192Mi             # 192 Mio max (>= maxmemory 128 + overhead)
+
+          # === Liveness : "Redis vivant ?" ===
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]   # PING -> doit retourner PONG
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          # === Readiness : "Redis pret ?" ===
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+
+  # === PVC genere automatiquement (suffixe par le nom du pod) ===
+  volumeClaimTemplates:
+    - metadata:
+        name: redisdata                 # PVC sera : redisdata-redis-0
+      spec:
+        accessModes: ["ReadWriteOnce"]  # RWO suffit (1 replica)
+        storageClassName: longhorn      # Longhorn en prod, local-path en k3d
+        resources:
+          requests:
+            storage: 1Gi                # 1 Gio (Redis ne stocke pas grand chose)

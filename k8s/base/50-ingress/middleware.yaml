@@ -1,0 +1,93 @@
+# =============================================================================
+# MIDDLEWARES TRAEFIK - "filtres" appliques aux requetes
+# =============================================================================
+# Un Middleware Traefik = un comportement applique a une route :
+#   - rate limiting
+#   - security headers
+#   - HTTP -> HTTPS redirect
+#   - compression
+# Equivalent du nginx.conf de l'etape Docker (limit_req, add_header...).
+# =============================================================================
+
+---
+# === Middleware 1 : Security Headers (OWASP) ===
+apiVersion: traefik.io/v1alpha1         # API Traefik (CRD)
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: lottoti
+spec:
+  headers:
+    frameDeny: true                     # X-Frame-Options: DENY (anti clickjacking)
+    contentTypeNosniff: true            # X-Content-Type-Options: nosniff
+    browserXssFilter: true              # X-XSS-Protection: 1; mode=block
+    referrerPolicy: strict-origin-when-cross-origin   # Limite les fuites de referer
+    permissionsPolicy: "camera=(), microphone=(), geolocation=(self)"   # API browser
+    customResponseHeaders:              # Headers additionnels custom
+      X-Content-Type-Options: nosniff
+      X-Frame-Options: DENY
+
+---
+# === Middleware 2 : Rate limiting GENERAL pour /api ===
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit-api
+  namespace: lottoti
+spec:
+  rateLimit:
+    average: 30                         # 30 req/s par IP en moyenne
+    burst: 50                           # Tolere des burst jusqu'a 50 req
+    period: 1s                          # Fenetre d'evaluation : 1 seconde
+
+---
+# === Middleware 3 : Rate limiting STRICT pour /api/auth ===
+# Plus restrictif pour proteger contre le bruteforce login
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit-auth
+  namespace: lottoti
+spec:
+  rateLimit:
+    average: 5                          # SEULEMENT 5 req/s par IP sur /api/auth
+    burst: 10                           # Tolere 10 req en burst
+    period: 1s
+
+---
+# === Middleware 4 : Rate limiting tres bas pour /api/health ===
+# Eviter qu'un attaquant fasse du healthcheck en boucle
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit-health
+  namespace: lottoti
+spec:
+  rateLimit:
+    average: 1                          # 1 req/s suffit (health = bot interne)
+    burst: 3
+    period: 1s
+
+---
+# === Middleware 5 : Compression Gzip ===
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: compress
+  namespace: lottoti
+spec:
+  compress: {}                          # Active la compression (gzip/brotli auto)
+                                        # Reduce la bande passante de 60-80%
+
+---
+# === Middleware 6 : HTTP -> HTTPS redirect (301) ===
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: lottoti
+spec:
+  redirectScheme:
+    scheme: https                       # Redirige vers HTTPS
+    permanent: true                     # 301 (vs 302 temporary)
+                                        # Le navigateur cache cette redirection

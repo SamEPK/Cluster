@@ -1,0 +1,15 @@
+# =============================================================================
+# PDB Frontend - garantie de 2 pods up minimum (zero downtime drains)
+# =============================================================================
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+  namespace: lottoti
+spec:
+  minAvailable: 2                       # Au moins 2 frontend up en permanence
+                                        # Avec replicas=3, k8s peut evicter max 1 a la fois
+  selector:
+    matchLabels:
+      app: frontend                     # S'applique aux pods avec app=frontend

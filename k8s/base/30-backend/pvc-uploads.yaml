@@ -1,0 +1,25 @@
+# =============================================================================
+# PVC "uploads" - volume RWX partage entre les replicas backend
+# =============================================================================
+# Probleme : 2 backend pods sur 2 nodes differents doivent ECRIRE dans le
+# meme dossier /app/uploads/ (photos uploadees par les users).
+# Solution : un PVC en RWX (ReadWriteMany) - lecture/ecriture par plusieurs
+# pods sur plusieurs nodes simultanement.
+# Longhorn supporte RWX nativement via NFS interne.
+# =============================================================================
+---
+apiVersion: v1
+kind: PersistentVolumeClaim             # Demande de volume (le PV est cree par la StorageClass)
+metadata:
+  name: uploads                         # Nom utilise dans Deployment.spec.volumes
+  namespace: lottoti
+  labels:
+    app: backend                        # Pour identifier que ce PVC appartient au backend
+    app.kubernetes.io/component: backend
+spec:
+  accessModes: ["ReadWriteMany"]        # RWX : multi-pod multi-node (vs RWO single node)
+  storageClassName: longhorn            # Provider Longhorn (cible Multipass)
+                                        # Sur k3d, override en local-path + RWO via overlay
+  resources:
+    requests:
+      storage: 5Gi                      # Demande 5 Gio (suffit pour les photos)

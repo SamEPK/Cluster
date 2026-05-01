@@ -1,0 +1,17 @@
+==========================================
+CAPTURE 01 — Cluster healthy
+Date: lun. 27 avr. 2026 13:21:38
+==========================================
+
+$ kubectl get nodes -o wide
+NAME                   STATUS   ROLES                  AGE   VERSION        INTERNAL-IP   EXTERNAL-IP   OS-IMAGE           KERNEL-VERSION                     CONTAINER-RUNTIME
+k3d-lottoti-agent-0    Ready    <none>                 23m   v1.31.5+k3s1   172.21.0.5    <none>        K3s v1.31.5+k3s1   6.6.87.2-microsoft-standard-WSL2   containerd://1.7.23-k3s2
+k3d-lottoti-agent-1    Ready    <none>                 23m   v1.31.5+k3s1   172.21.0.4    <none>        K3s v1.31.5+k3s1   6.6.87.2-microsoft-standard-WSL2   containerd://1.7.23-k3s2
+k3d-lottoti-server-0   Ready    control-plane,master   23m   v1.31.5+k3s1   172.21.0.3    <none>        K3s v1.31.5+k3s1   6.6.87.2-microsoft-standard-WSL2   containerd://1.7.23-k3s2
+
+$ docker ps --filter name=k3d-lottoti --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+NAMES                  STATUS          IMAGE
+k3d-lottoti-serverlb   Up 23 minutes   ghcr.io/k3d-io/k3d-proxy:5.8.3
+k3d-lottoti-agent-1    Up 23 minutes   rancher/k3s:v1.31.5-k3s1
+k3d-lottoti-agent-0    Up 23 minutes   rancher/k3s:v1.31.5-k3s1
+k3d-lottoti-server-0   Up 23 minutes   rancher/k3s:v1.31.5-k3s1

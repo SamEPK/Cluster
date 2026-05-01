@@ -1,0 +1,66 @@
+# =============================================================================
+# NETWORK POLICIES Frontend (Next.js)
+# =============================================================================
+
+---
+# === INGRESS : qui peut JOINDRE le frontend ? ===
+# Seul Traefik (Ingress controller, namespace traefik) atteint Next.js sur 3000
+# Les utilisateurs externes passent TOUJOURS par Traefik (jamais en direct sur le pod)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-from-ingress
+  namespace: lottoti
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend                     # S'applique aux pods frontend
+  policyTypes:
+    - Ingress                           # Trafic entrant
+  ingress:
+    - from:
+        - namespaceSelector:            # Source : tout pod du namespace traefik
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000                    # Port Next.js standalone
+
+---
+# === EGRESS : ou le frontend peut-il sortir ? ===
+# Next.js peut faire du SSR : pendant le rendu serveur, il fetch /api/...
+# pour pre-charger les donnees. Donc il a besoin de joindre le backend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-egress
+  namespace: lottoti
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Egress                            # Trafic sortant
+  egress:
+    # === Destination 1 : backend (pour le SSR) ===
+    - to:
+        - podSelector:
+            matchLabels:
+              app: backend              # Pods backend
+      ports:
+        - protocol: TCP
+          port: 5000
+
+    # === Destination 2 : Internet HTTPS ===
+    # Pour les CDN (fonts.googleapis.com, images.unsplash.com) ou
+    # webhooks externes appeles depuis le serveur Next.js
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0             # Tout l'Internet
+            except:                     # Sauf reseaux internes (anti-SSRF)
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443                     # HTTPS uniquement

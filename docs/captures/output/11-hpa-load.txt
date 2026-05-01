@@ -1,0 +1,46 @@
+==========================================
+CAPTURE 11 — HPA Autoscaling SCALE-UP
+==========================================
+
+Methodologie : abaissement temporaire du seuil memory de 80% a 25%
+(sous le baseline 34%) pour forcer le HPA a scale-up.
+En prod reel, ce sont les requetes utilisateur qui declenchent.
+
+$ kubectl -n lottoti get hpa backend
+NAME      REFERENCE            TARGETS                        MINPODS   MAXPODS   REPLICAS   AGE
+backend   Deployment/backend   cpu: 1%/70%, memory: 33%/25%   1         4         2          17m
+
+$ kubectl -n lottoti get pods -l app=backend  (apres 90s)
+NAME                      READY   STATUS    RESTARTS   AGE   IP          NODE                  NOMINATED NODE   READINESS GATES
+backend-d85c5ff77-z87k9   1/1     Running   0          70s   10.42.2.9   k3d-lottoti-agent-1   <none>           <none>
+backend-d85c5ff77-zmlxc   1/1     Running   0          17m   10.42.2.6   k3d-lottoti-agent-1   <none>           <none>
+
+$ kubectl -n lottoti describe hpa backend
+    Stabilization Window: 60 seconds
+    Select Policy: Max
+    Policies:
+      - Type: Pods     Value: 2   Period: 60 seconds
+      - Type: Percent  Value: 50  Period: 60 seconds
+  Scale Down:
+    Stabilization Window: 300 seconds
+    Select Policy: Max
+    Policies:
+      - Type: Percent  Value: 25  Period: 60 seconds
+Deployment pods:       2 current / 2 desired
+Conditions:
+  Type            Status  Reason              Message
+  ----            ------  ------              -------
+  AbleToScale     True    ScaleUpStabilized   recent recommendations were lower than current one, applying the lowest recent recommendation
+  ScalingActive   True    ValidMetricFound    the HPA was able to successfully calculate a replica count from memory resource utilization (percentage of request)
+  ScalingLimited  False   DesiredWithinRange  the desired count is within the acceptable range
+Events:
+  Type     Reason                        Age                From                       Message
+  ----     ------                        ----               ----                       -------
+  Warning  FailedGetResourceMetric       15m (x5 over 16m)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedGetResourceMetric       15m (x5 over 16m)  horizontal-pod-autoscaler  failed to get memory utilization: unable to get metrics for resource memory: no metrics returned from resource metrics API
+  Warning  FailedComputeMetricsReplicas  15m (x5 over 16m)  horizontal-pod-autoscaler  invalid metrics (2 invalid out of 2), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedGetResourceMetric       15m                horizontal-pod-autoscaler  failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+  Normal   SuccessfulRescale             70s                horizontal-pod-autoscaler  New size: 2; reason: memory resource utilization (percentage of request) above target
+
+Bilan : HPA passe de REPLICAS=1 a REPLICAS=2 sur depassement seuil memory.
+Capacite max configuree : 4 replicas.

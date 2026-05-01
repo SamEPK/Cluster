@@ -1,0 +1,144 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Overlay K3D : version DEMO pour preuve de bon fonctionnement.
+# Ne PAS utiliser en prod. Pour la prod, utiliser overlay 'prod' + Multipass + Longhorn.
+#
+# Differences vs prod:
+#  - StorageClass local-path (k3d natif) au lieu de longhorn
+#  - uploads en RWO (au lieu de RWX) car local-path ne supporte que RWO
+#  - backend forced a 1 replica (consequence du RWO)
+#  - frontend stub: nginx (au lieu de Next.js LottoTi non-build dans cet env)
+#  - backend stub: nginx (au lieu de Flask LottoTi non-build dans cet env)
+resources:
+  - ../../base
+
+commonAnnotations:
+  lottoti.io/environment: k3d-demo
+
+images:
+  - name: lottoti/backend
+    newName: nginx
+    newTag: alpine
+  - name: lottoti/frontend
+    newName: nginx
+    newTag: alpine
+
+patches:
+  # Postgres: longhorn -> local-path
+  - target:
+      kind: StatefulSet
+      name: postgres
+    patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: remove
+        path: /spec/template/spec/affinity
+  # Redis: longhorn -> local-path
+  - target:
+      kind: StatefulSet
+      name: redis
+    patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: remove
+        path: /spec/template/spec/affinity
+  # Uploads: RWX longhorn -> RWO local-path (k3d ne supporte pas RWX simplement)
+  - target:
+      kind: PersistentVolumeClaim
+      name: uploads
+    patch: |-
+      - op: replace
+        path: /spec/storageClassName
+        value: local-path
+      - op: replace
+        path: /spec/accessModes
+        value: ["ReadWriteOnce"]
+  # Backend: 1 replica (forced par RWO sur uploads), nginx stub remplace les init containers et probes
+  - target:
+      kind: Deployment
+      name: backend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: remove
+        path: /spec/template/spec/initContainers
+      - op: replace
+        path: /spec/template/spec/containers/0/ports/0/containerPort
+        value: 80
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value: []
+      - op: remove
+        path: /spec/template/spec/containers/0/envFrom
+      - op: remove
+        path: /spec/template/spec/containers/0/startupProbe
+      - op: replace
+        path: /spec/template/spec/containers/0/livenessProbe
+        value:
+          httpGet: {path: /, port: 80}
+          initialDelaySeconds: 5
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe
+        value:
+          httpGet: {path: /, port: 80}
+  - target:
+      kind: Service
+      name: backend
+    patch: |-
+      - op: replace
+        path: /spec/ports/0/targetPort
+        value: 80
+  # Frontend: nginx stub (deja replace par image override)
+  - target:
+      kind: Deployment
+      name: frontend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: replace
+        path: /spec/template/spec/containers/0/ports/0/containerPort
+        value: 80
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value: []
+      - op: remove
+        path: /spec/template/spec/containers/0/startupProbe
+      - op: replace
+        path: /spec/template/spec/containers/0/livenessProbe
+        value:
+          httpGet: {path: /, port: 80}
+          initialDelaySeconds: 5
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe
+        value:
+          httpGet: {path: /, port: 80}
+  - target:
+      kind: Service
+      name: frontend
+    patch: |-
+      - op: replace
+        path: /spec/ports/0/targetPort
+        value: 80
+  # PDB backend: minAvailable 1 -> 0 (impossible avec 1 replica)
+  - target:
+      kind: PodDisruptionBudget
+      name: backend
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 0
+  # HPA backend: 1->4 (aligne avec 1 replica forced)
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: backend
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 4

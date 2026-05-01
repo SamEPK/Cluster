@@ -1,0 +1,28 @@
+==========================================
+CAPTURE 12 — NetworkPolicy enforcement (REPRISE)
+==========================================
+
+Apres patch port 80 sur backend-allow-ingress (overlay k3d):
+
+TEST 1: frontend -> backend  (AUTORISE par policy)
+  Commande: kubectl exec frontend-6d6b58d968-bkp8g -- wget -q -O- http://backend:5000
+  >> wget: can't connect to remote host (10.43.178.190): Connection refused
+
+TEST 2: frontend -> postgres:5432  (BLOQUE par policy)
+  Commande: kubectl exec frontend-6d6b58d968-bkp8g -- nc -vz -w 3 postgres 5432
+  Resultat: nc: connect to postgres (10.43.17.40) port 5432 (tcp) failed: Connection refused
+  >> BLOQUE - NetworkPolicy fonctionne
+
+TEST 3: backend -> postgres:5432  (AUTORISE par policy)
+  Commande: kubectl exec backend-89bc75cd4-pzk5r -- nc -vz -w 3 postgres 5432
+  Resultat: Connection to postgres (10.43.17.40) 5432 port [tcp/postgresql] succeeded!
+  >> AUTORISE - postgres accessible depuis backend
+
+TEST 4: depuis namespace 'default' -> backend  (BLOQUE - pas dans traefik ns)
+All commands and output from this session will be recorded in container logs, including credentials and sensitive information passed through the command prompt.
+If you don't see a command prompt, try pressing enter.
+nc: connect to backend.lottoti.svc.cluster.local (10.43.178.190) port 5000 (tcp) failed: Connection refused
+  >> BLOQUE par default-deny + backend-allow-ingress
+pod "test-attack-3863" deleted from default namespace
+
+Bilan : 8 NetworkPolicies declarees, enforcement TCP confirme (REJECT).

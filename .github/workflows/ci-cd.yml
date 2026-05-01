@@ -1,0 +1,178 @@
+name: CI/CD - Build & Deploy LottoTi
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'k8s/**'
+      - 'charts/**'
+      - 'scripts/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environnement cible"
+        required: true
+        default: "dev"
+        type: choice
+        options: [dev, prod]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  # ============================================================
+  # 1. LINT manifests Kubernetes
+  # ============================================================
+  lint-k8s:
+    name: Lint Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz" \
+            | tar xz -C /usr/local/bin kubeconform
+
+      - name: Setup kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Build & validate base
+        run: |
+          kustomize build k8s/base > /tmp/base.yaml
+          kubeconform -strict -ignore-missing-schemas -summary /tmp/base.yaml
+
+      - name: Build & validate overlays
+        run: |
+          for ovl in k8s/overlays/*/; do
+            echo "=== $ovl ==="
+            kustomize build "$ovl" | kubeconform -strict -ignore-missing-schemas -summary -
+          done
+
+  # ============================================================
+  # 2. LINT Helm chart
+  # ============================================================
+  lint-helm:
+    name: Lint Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: helm lint
+        run: helm lint charts/lottoti
+
+      - name: helm template (smoke)
+        run: |
+          helm template lottoti charts/lottoti \
+            --namespace lottoti \
+            --set secrets.createSecret=true \
+            --set secrets.postgresPassword=test \
+            --set secrets.flaskSecretKey=test \
+            --set secrets.jwtSecretKey=test \
+            > /tmp/render.yaml
+          test -s /tmp/render.yaml
+
+  # ============================================================
+  # 3. BUILD images Docker (backend + frontend)
+  # Source: ../LottoTi (sibling repo or submodule)
+  # ============================================================
+  build-images:
+    name: Build & push Docker images
+    runs-on: ubuntu-latest
+    needs: [lint-k8s, lint-helm]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image:
+          - {name: backend, context: backend}
+          - {name: frontend, context: lottoit}
+    steps:
+      - name: Checkout cluster repo
+        uses: actions/checkout@v4
+
+      - name: Checkout LottoTi sources
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/LottoTi
+          path: lottoti-src
+          token: ${{ secrets.LOTTOTI_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lottoti-${{ matrix.image.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & push
+        uses: docker/build-push-action@v5
+        with:
+          context: lottoti-src/${{ matrix.image.context }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================
+  # 4. DEPLOY (workflow_dispatch ou tag)
+  # ============================================================
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'dev' }}
+    runs-on: ubuntu-latest
+    needs: build-images
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Deploy via Kustomize
+        env:
+          OVERLAY: ${{ github.event.inputs.environment || 'dev' }}
+        run: |
+          # Update images to commit SHA
+          cd k8s/overlays/$OVERLAY
+          kustomize edit set image \
+            lottoti/backend=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lottoti-backend:sha-$(git rev-parse --short HEAD) \
+            lottoti/frontend=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lottoti-frontend:sha-$(git rev-parse --short HEAD)
+          cd -
+          kubectl apply -k k8s/overlays/$OVERLAY
+
+          # BONUS: rollback automatique en cas d'echec
+          kubectl -n lottoti rollout status deploy/backend --timeout=5m \
+            || (echo "Backend rollout failed - rolling back"; kubectl -n lottoti rollout undo deploy/backend; exit 1)
+          kubectl -n lottoti rollout status deploy/frontend --timeout=5m \
+            || (echo "Frontend rollout failed - rolling back"; kubectl -n lottoti rollout undo deploy/frontend; exit 1)

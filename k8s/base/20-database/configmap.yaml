@@ -1,0 +1,28 @@
+# =============================================================================
+# ConfigMap "postgres-config" - parametres NON sensibles pour Postgres
+# =============================================================================
+# Un ConfigMap stocke des cles/valeurs en clair (pas comme un Secret chiffre).
+# Utilise pour : nom de DB, nom d'utilisateur (pas le password !), tuning SQL.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config                 # Nom utilise dans configMapKeyRef
+  namespace: lottoti                    # ConfigMap = scope namespace
+data:                                   # Map de cles -> valeurs (toutes en string)
+  POSTGRES_DB: lottoit                  # Nom de la base creee au 1er demarrage
+  POSTGRES_USER: lottoit                # Utilisateur Postgres (pas root !)
+  PGDATA: /var/lib/postgresql/data/pgdata  # Sous-chemin pour les data (recommande par image officielle)
+  # === postgresql.conf (fichier de config Postgres) ===
+  # Cle multi-ligne YAML (|), montee en fichier dans le pod
+  postgresql.conf: |
+    listen_addresses = '*'              # ecoute sur toutes les interfaces (necessaire en cluster)
+    max_connections = 100               # max 100 clients simultanes
+    shared_buffers = 256MB              # cache de pages en RAM (~25% RAM dispo)
+    effective_cache_size = 768MB        # estimation du cache OS (pour le planner)
+    work_mem = 8MB                      # RAM par operation de tri/hash
+    maintenance_work_mem = 128MB        # RAM pour VACUUM, CREATE INDEX, etc.
+    log_min_duration_statement = 500    # log les requetes > 500ms (slow query log)
+    log_destination = 'stderr'          # logs vers stderr (-> kubectl logs)
+    log_timezone = 'UTC'                # timezone des logs
+    timezone = 'UTC'                    # timezone du serveur (toujours UTC en cluster)

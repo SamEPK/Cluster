@@ -1,0 +1,156 @@
+# =============================================================================
+# STATEFULSET Postgres
+# =============================================================================
+# Pourquoi StatefulSet (et pas Deployment) ?
+#  - Identite stable : le pod sera TOUJOURS "postgres-0"
+#  - PVC dedie : pgdata-postgres-0 le suit (meme apres recreation)
+#  - Demarrage ordonne (postgres-0 avant postgres-1, etc.)
+# Ces proprietes sont essentielles pour les bases de donnees.
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres                        # Prefixe des pods : postgres-0, postgres-1...
+  namespace: lottoti
+  labels:                               # Labels du StatefulSet
+    app: postgres
+    tier: database
+    app.kubernetes.io/component: database     # Convention k8s : composant
+    app.kubernetes.io/part-of: lottoti        # Convention k8s : appli parente
+spec:
+  serviceName: postgres-headless        # Reference au headless service (DNS)
+  replicas: 1                           # 1 seul pod (PDF dit "1 replica suffit")
+
+  selector:                             # Le StatefulSet gere les pods avec ces labels
+    matchLabels:
+      app: postgres                     # DOIT matcher template.metadata.labels
+
+  template:                             # Template du pod (cree N fois selon replicas)
+    metadata:
+      labels:                           # Labels appliques aux pods
+        app: postgres
+        tier: database
+    spec:
+      # === BONUS Node Affinity ===
+      # Force Postgres sur un worker labellise storage=true
+      # (ces workers ont Longhorn pour la persistance)
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:  # contrainte HARD
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: storage        # Cherche les nodes avec ce label
+                    operator: In
+                    values: ["true"]    # storage=true
+
+      securityContext:                  # Securite niveau pod
+        fsGroup: 999                    # GID 999 = postgres dans l'image alpine
+                                        # Donne au pod l'acces aux fichiers du PVC
+
+      containers:                       # Liste des conteneurs dans le pod
+        - name: postgres                # Nom du conteneur (vu dans kubectl logs)
+          image: postgres:16-alpine     # Image officielle Postgres 16 (alpine = legere)
+          imagePullPolicy: IfNotPresent # Pull seulement si pas deja en local
+
+          # === Args : commande passee au conteneur ===
+          args:
+            - postgres                  # Lance le binaire postgres
+            - -c                        # Option : config file
+            - config_file=/etc/postgresql/postgresql.conf  # Notre config custom
+
+          ports:
+            - name: postgres            # Nom du port (utile pour Probes)
+              containerPort: 5432       # Port ecoute par Postgres
+
+          # === Variables d'environnement ===
+          env:
+            - name: POSTGRES_DB         # Nom de la DB cree au 1er demarrage
+              valueFrom:
+                configMapKeyRef:        # Lit depuis le ConfigMap
+                  name: postgres-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER       # Utilisateur Postgres
+              valueFrom:
+                configMapKeyRef:
+                  name: postgres-config
+                  key: POSTGRES_USER
+            - name: PGDATA              # Sous-chemin des data
+              valueFrom:
+                configMapKeyRef:
+                  name: postgres-config
+                  key: PGDATA
+            - name: POSTGRES_PASSWORD   # MOT DE PASSE - depuis le SECRET
+              valueFrom:
+                secretKeyRef:           # Lit depuis le Secret (chiffre)
+                  name: lottoti-secrets
+                  key: POSTGRES_PASSWORD
+
+          # === Volumes montes dans le conteneur ===
+          volumeMounts:
+            - name: pgdata              # Reference au volumeClaimTemplate ci-dessous
+              mountPath: /var/lib/postgresql/data  # Chemin dans le conteneur
+            - name: pgconf              # Le ConfigMap monte comme fichier
+              mountPath: /etc/postgresql/postgresql.conf
+              subPath: postgresql.conf  # Monte SEULEMENT cette cle, pas tout le ConfigMap
+
+          # === BONUS : Resource Requests & Limits + QoS Burstable ===
+          resources:
+            requests:                   # Garanti par le scheduler (reserve)
+              cpu: 200m                 # 0.2 CPU
+              memory: 512Mi             # 512 Mio garantis
+            limits:                     # Hard limit (kill si depasse memory)
+              cpu: "1"                  # 1 CPU max
+              memory: 1Gi               # 1 Gio max
+
+          # === livenessProbe : "Le pod est-il TOUJOURS vivant ?" ===
+          # Si echec X fois, k8s tue le pod et le redemarre
+          livenessProbe:
+            exec:                       # Execute une commande dans le pod
+              command: ["pg_isready", "-U", "lottoit", "-d", "lottoit"]
+            initialDelaySeconds: 30     # Attend 30s avant 1ere check (boot lent)
+            periodSeconds: 10           # Verifie toutes les 10s
+            timeoutSeconds: 5           # Timeout par check
+            failureThreshold: 6         # 6 echecs = tue le pod (60s de tolerance)
+
+          # === readinessProbe : "Le pod est-il PRET a recevoir du trafic ?" ===
+          # Si echec, k8s retire le pod du Service (load balancer) sans le tuer
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "lottoit", "-d", "lottoit"]
+            initialDelaySeconds: 5
+            periodSeconds: 5            # Verifie plus frequemment
+            timeoutSeconds: 3
+            failureThreshold: 6
+
+          # === startupProbe : "Le pod a-t-il fini de demarrer ?" ===
+          # Active pendant le boot, puis liveness/readiness prennent le relais
+          # Tolere des demarrages tres lents (migrations, restore, etc.)
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "lottoit", "-d", "lottoit"]
+            periodSeconds: 5
+            failureThreshold: 60        # 60 * 5s = 5 min de tolerance au boot
+
+      # === Volumes du POD (pas le PVC pgdata, qui est genere par le template) ===
+      volumes:
+        - name: pgconf                  # Reference utilisee plus haut dans volumeMounts
+          configMap:
+            name: postgres-config
+            items:                      # Selectionne quelles cles du ConfigMap exposer
+              - key: postgresql.conf    # Cette cle dans le ConfigMap
+                path: postgresql.conf   # Devient ce fichier dans le volume
+
+  # === volumeClaimTemplates : un PVC genere AUTOMATIQUEMENT par pod ===
+  # Specificite des StatefulSets : si replicas=3, on aura
+  # pgdata-postgres-0, pgdata-postgres-1, pgdata-postgres-2 (chacun son disque)
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata                    # Nom du PVC (prefixe par le pod : pgdata-postgres-0)
+        labels:
+          app: postgres
+      spec:
+        accessModes: ["ReadWriteOnce"]  # RWO : 1 seul node a la fois (suffit pour 1 replica)
+        storageClassName: longhorn      # Provider de stockage (Longhorn en prod, local-path en k3d)
+        resources:
+          requests:
+            storage: 5Gi                # Demande 5 Gio

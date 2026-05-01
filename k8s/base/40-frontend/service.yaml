@@ -1,0 +1,20 @@
+# =============================================================================
+# SERVICE Frontend - load balancer pour les 3 pods Next.js
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend                        # DNS court : frontend.lottoti.svc
+  namespace: lottoti
+  labels:
+    app: frontend
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP                       # IP virtuelle interne, exposee via Ingress
+  selector:
+    app: frontend                       # Pointe vers les pods Next.js
+  ports:
+    - name: http
+      port: 3000                        # Port expose par le service
+      targetPort: 3000                  # Port du pod (Next.js standalone)
+      protocol: TCP

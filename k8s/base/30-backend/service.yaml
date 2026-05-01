@@ -1,0 +1,35 @@
+# =============================================================================
+# SERVICE Backend - load balancer interne pour les 2 pods Flask
+# =============================================================================
+# Le frontend (et l'Ingress) appellent "backend:5000". Le Service distribue
+# les requetes vers les pods backend selon les labels.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend                         # DNS court : backend.lottoti.svc.cluster.local
+  namespace: lottoti
+  labels:
+    app: backend
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP                       # Default : IP virtuelle interne (pas exposee a l'exterieur)
+
+  # === Sticky session ClientIP ===
+  # Pourquoi ? Le backend utilise Socket.IO (WebSocket). Si un user se connecte
+  # au pod A et qu'un message arrive sur le pod B, il faudrait Redis pubsub
+  # pour synchroniser. La sticky session colle le client au meme pod.
+  # C'est une "ceinture+bretelles" : le pubsub Redis fait deja le job en realite.
+  sessionAffinity: ClientIP             # Hash IP -> meme pod (1h)
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600              # 1h, puis re-load-balance
+
+  selector:                             # Selectionne les pods cibles
+    app: backend                        # Pointe vers les pods avec ce label
+
+  ports:
+    - name: http                        # Nom du port (utile pour Probes/Ingress)
+      port: 5000                        # Port expose par le service
+      targetPort: 5000                  # Port du pod (Flask + Gunicorn)
+      protocol: TCP

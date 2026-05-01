@@ -1,0 +1,35 @@
+==========================================
+CAPTURE 09 — Rollback
+==========================================
+
+ETAPE 1: Casse volontairement le frontend (image inexistante)
+$ kubectl -n lottoti set image deploy/frontend web=lottoti/frontend:DOES_NOT_EXIST
+Warning: would violate PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "web" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container "web" must set securityContext.capabilities.drop=["ALL"]), runAsNonRoot != true (pod or container "web" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container "web" must set securityContext.seccompProfile.type to "RuntimeDefault" or "Localhost")
+deployment.apps/frontend image updated
+
+Wait 20s pour ImagePullBackOff...
+
+$ kubectl -n lottoti get pods -l app=frontend  (cassé)
+NAME                        READY   STATUS             RESTARTS   AGE
+frontend-6d6b58d968-bkp8g   1/1     Running            0          40s
+frontend-6d6b58d968-gjg94   1/1     Running            0          38s
+frontend-6d6b58d968-xzhgq   1/1     Running            0          41s
+frontend-7dbbbf474-j49wz    0/1     ImagePullBackOff   0          20s
+
+ETAPE 2: ROLLBACK
+$ kubectl -n lottoti rollout undo deploy/frontend
+Warning: would violate PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "web" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container "web" must set securityContext.capabilities.drop=["ALL"]), runAsNonRoot != true (pod or container "web" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container "web" must set securityContext.seccompProfile.type to "RuntimeDefault" or "Localhost")
+deployment.apps/frontend rolled back
+
+$ kubectl -n lottoti rollout status deploy/frontend
+deployment "frontend" successfully rolled out
+
+$ kubectl -n lottoti get pods -l app=frontend  (restored)
+NAME                        READY   STATUS        RESTARTS   AGE
+frontend-6d6b58d968-bkp8g   1/1     Running       0          42s
+frontend-6d6b58d968-gjg94   1/1     Running       0          40s
+frontend-6d6b58d968-xzhgq   1/1     Running       0          43s
+frontend-7dbbbf474-j49wz    0/1     Terminating   0          22s
+
+$ kubectl -n lottoti get deploy frontend -o jsonpath='{.spec.template.spec.containers[0].image}'
+nginx:alpine

@@ -1,0 +1,28 @@
+# =============================================================================
+# NAMESPACES - cloisonnement logique des ressources LottoTi
+# =============================================================================
+# Un namespace = un "dossier" dans le cluster. Toutes nos ressources (pods,
+# services, secrets, etc.) seront dedans, separees du reste (kube-system,
+# traefik, cert-manager...).
+# =============================================================================
+---
+# === Namespace principal de l'application ===
+apiVersion: v1                          # Version de l'API Kubernetes utilisee
+kind: Namespace                         # Type de ressource : un namespace
+metadata:
+  name: lottoti                         # Nom du namespace (utilise dans -n lottoti)
+  labels:                               # Etiquettes pour identifier/filtrer
+    name: lottoti                       #   pour selectionner ce ns par label
+    app.kubernetes.io/part-of: lottoti  #   convention k8s : "fait partie de l'app lottoti"
+    # Pod Security Admission : couche de securite native k8s (depuis 1.25)
+    pod-security.kubernetes.io/enforce: baseline  # bloque les pods vraiment dangereux (privileged, hostPID...)
+    pod-security.kubernetes.io/warn: restricted   # affiche un warning sur les pods non conformes au profil strict
+---
+# === Namespace pour le monitoring (futur usage : Prometheus, Grafana) ===
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lottoti-monitoring              # Reserve pour des outils de monitoring
+  labels:
+    name: lottoti-monitoring
+    app.kubernetes.io/part-of: lottoti

@@ -1,0 +1,45 @@
+==========================================
+CAPTURE 15 — Resource Limits + QoS Burstable
+==========================================
+
+$ kubectl -n lottoti get pods -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass,NODE:.spec.nodeName
+NAME                        QOS         NODE
+backend-89bc75cd4-pzk5r     Burstable   k3d-lottoti-agent-1
+frontend-6d6b58d968-bkp8g   Burstable   k3d-lottoti-agent-0
+frontend-6d6b58d968-gjg94   Burstable   k3d-lottoti-server-0
+frontend-6d6b58d968-xzhgq   Burstable   k3d-lottoti-agent-1
+postgres-0                  Burstable   k3d-lottoti-server-0
+redis-0                     Burstable   k3d-lottoti-agent-0
+
+Detail resources backend:
+{
+    "limits": {
+        "cpu": "1",
+        "memory": "768Mi"
+    },
+    "requests": {
+        "cpu": "200m",
+        "memory": "384Mi"
+    }
+}
+
+Detail resources postgres:
+{
+    "limits": {
+        "cpu": "1",
+        "memory": "1Gi"
+    },
+    "requests": {
+        "cpu": "200m",
+        "memory": "512Mi"
+    }
+}
+
+$ kubectl top pods -n lottoti  (consommation reelle)
+NAME                        CPU(cores)   MEMORY(bytes)   
+backend-89bc75cd4-pzk5r     1m           13Mi            
+frontend-6d6b58d968-bkp8g   1m           13Mi            
+frontend-6d6b58d968-gjg94   1m           10Mi            
+frontend-6d6b58d968-xzhgq   1m           10Mi            
+postgres-0                  9m           26Mi            
+redis-0                     12m          3Mi             

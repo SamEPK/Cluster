@@ -1,0 +1,15 @@
+# =============================================================================
+# ClusterIssuer "selfsigned-bootstrap"
+# =============================================================================
+# Un ClusterIssuer = "qui peut signer des certificats" (cluster-wide).
+# Celui-ci est SELF-SIGNED (s'auto-signe) - utilise UNIQUEMENT pour creer
+# notre propre Autorite de Certification (CA) ensuite.
+# Apres ca, on n'utilise plus jamais selfsigned-bootstrap directement.
+# =============================================================================
+apiVersion: cert-manager.io/v1          # API du projet cert-manager (CRD)
+kind: ClusterIssuer                     # ClusterIssuer = scope cluster (vs Issuer = namespace)
+metadata:
+  name: selfsigned-bootstrap            # Nom utilise dans certificate.issuerRef
+spec:
+  selfSigned: {}                        # Type "self-signed" : signe avec sa propre cle, sans CA externe
+                                        # Le {} vide = pas de config particuliere

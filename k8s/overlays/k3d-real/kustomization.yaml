@@ -1,0 +1,93 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Overlay K3D-REAL : aligne avec les exigences du PDF projet ESGI
+#  - backend >= 2 replicas (sujet)
+#  - frontend >= 3 replicas (sujet)
+#  - DB 1 replica (sujet)
+# Adaptations k3d (vs Multipass+Longhorn) :
+#  - storageClassName local-path (pas Longhorn)
+#  - uploads PVC RWO + nodeAffinity (les 2 backend pods sur le meme node)
+resources:
+  - ../../base
+
+commonAnnotations:
+  lottoti.io/environment: k3d-real
+
+patches:
+  # Postgres: longhorn -> local-path
+  - target:
+      kind: StatefulSet
+      name: postgres
+    patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: remove
+        path: /spec/template/spec/affinity
+  # Redis: longhorn -> local-path
+  - target:
+      kind: StatefulSet
+      name: redis
+    patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: remove
+        path: /spec/template/spec/affinity
+  # Uploads: RWX longhorn -> RWO local-path
+  - target:
+      kind: PersistentVolumeClaim
+      name: uploads
+    patch: |-
+      - op: replace
+        path: /spec/storageClassName
+        value: local-path
+      - op: replace
+        path: /spec/accessModes
+        value: ["ReadWriteOnce"]
+  # Backend: GARDE 2 replicas (exigence PDF) mais force les 2 pods sur le meme node
+  # via nodeAffinity (RWO accepte plusieurs pods sur le meme node).
+  - target:
+      kind: Deployment
+      name: backend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: In
+                      values: ["k3d-lottoti-agent-1"]
+  # Frontend: 3 replicas (exigence PDF), antiAffinity pour repartir sur 3 nodes
+  - target:
+      kind: Deployment
+      name: frontend
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+  # PDB backend: minAvailable=1
+  - target:
+      kind: PodDisruptionBudget
+      name: backend
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+  # HPA backend: 2->4
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: backend
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
+      - op: replace
+        path: /spec/maxReplicas
+        value: 4

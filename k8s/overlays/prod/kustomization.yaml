@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Overlay PROD: hostname reel, ressources prod, replicas conformes au sujet.
+resources:
+  - ../../base
+
+commonAnnotations:
+  lottoti.io/environment: production
+
+# Tag d'image pin (override en CI via kustomize edit set image)
+images:
+  - name: lottoti/backend
+    newTag: 1.0.0
+  - name: lottoti/frontend
+    newTag: 1.0.0
+
+# Pas de patches pour l'instant - le base est deja prod-ready

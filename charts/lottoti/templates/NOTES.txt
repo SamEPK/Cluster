@@ -1,0 +1,29 @@
+==========================================================================
+  LottoTi a ete deploye via Helm chart {{ .Chart.Name }}-{{ .Chart.Version }}
+==========================================================================
+
+Namespace : {{ .Release.Namespace }}
+Domain    : {{ .Values.global.domain }}
+
+Verifier le deploiement :
+
+  kubectl -n {{ .Release.Namespace }} get all
+  kubectl -n {{ .Release.Namespace }} get ingress
+  kubectl -n {{ .Release.Namespace }} get certificate
+
+Acceder a l'application :
+
+  https://{{ .Values.global.domain }}
+  https://api.{{ .Values.global.domain }}
+
+Si le DNS local n'est pas configure, ajoute a /etc/hosts (ou C:\Windows\System32\drivers\etc\hosts) :
+
+  <MASTER_IP> {{ .Values.global.domain }} api.{{ .Values.global.domain }}
+
+Pour upgrade :
+
+  helm upgrade {{ .Release.Name }} ./charts/lottoti -n {{ .Release.Namespace }}
+
+Pour rollback :
+
+  helm rollback {{ .Release.Name }} -n {{ .Release.Namespace }}

@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Ces ressources sont posees PAR le script 04-install-cert-manager.sh
+# (cert-manager doit etre operationnel AVANT). Inclus ici pour reference
+# et pour permettre `kubectl apply -k k8s/base/15-cert-manager/` apres install.
+resources:
+  - 00-selfsigned-issuer.yaml
+  - 01-ca-certificate.yaml
+  - 02-ca-issuer.yaml

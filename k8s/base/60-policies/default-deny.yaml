@@ -1,0 +1,48 @@
+# =============================================================================
+# NETWORK POLICIES - Bonus 3 (+1 pt)
+# =============================================================================
+# Par DEFAUT dans Kubernetes : tous les pods peuvent se parler (no firewall).
+# C'est dangereux : si un pod est compromis, l'attaquant accede a tout.
+#
+# Approche ZERO-TRUST :
+#   1. Deny ALL par defaut (ce fichier)
+#   2. Autoriser EXPLICITEMENT chaque flux necessaire (autres fichiers)
+# =============================================================================
+
+---
+# === 1. DEFAULT DENY ALL : bloque tout ingress + egress ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: lottoti
+spec:
+  podSelector: {}                       # {} = TOUS les pods du namespace
+  policyTypes:                          # Que bloquer ?
+    - Ingress                           #   Trafic ENTRANT (vers les pods)
+    - Egress                            #   Trafic SORTANT (depuis les pods)
+  # Note : PAS de section "ingress:" ni "egress:" => tout est bloque par defaut
+
+---
+# === 2. ALLOW DNS : sinon plus rien ne resout (postgres, redis, internet...) ===
+# Cette policy autorise UNIQUEMENT le DNS (port 53 UDP/TCP) vers kube-system
+# (ou tournent CoreDNS). Sans ca, meme un getent hosts ne marche pas.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: lottoti
+spec:
+  podSelector: {}                       # S'applique a TOUS les pods
+  policyTypes:
+    - Egress                            # Pour le trafic SORTANT
+  egress:
+    - to:
+        - namespaceSelector:            # Vers le namespace kube-system
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP                 # DNS standard sur UDP/53
+          port: 53
+        - protocol: TCP                 # DNS sur TCP/53 (reponses larges)
+          port: 53

@@ -1,0 +1,30 @@
+==========================================
+CAPTURE 05 — Scale up / down frontend
+==========================================
+
+$ kubectl -n lottoti get pods -l app=frontend -o wide  (avant)
+NAME                        READY   STATUS    RESTARTS   AGE     IP          NODE                   NOMINATED NODE   READINESS GATES
+frontend-74f87db87b-747vx   1/1     Running   0          2m29s   10.42.2.4   k3d-lottoti-server-0   <none>           <none>
+frontend-74f87db87b-76l97   1/1     Running   0          2m29s   10.42.1.5   k3d-lottoti-agent-1    <none>           <none>
+frontend-74f87db87b-fg7gq   1/1     Running   0          2m29s   10.42.0.5   k3d-lottoti-agent-0    <none>           <none>
+
+$ kubectl -n lottoti scale deploy/frontend --replicas=6
+deployment.apps/frontend scaled
+
+$ kubectl -n lottoti get pods -l app=frontend -o wide  (apres scale up)
+NAME                        READY   STATUS        RESTARTS   AGE     IP          NODE                   NOMINATED NODE   READINESS GATES
+frontend-74f87db87b-25zbb   1/1     Terminating   0          9s      10.42.0.8   k3d-lottoti-agent-0    <none>           <none>
+frontend-74f87db87b-747vx   1/1     Running       0          2m38s   10.42.2.4   k3d-lottoti-server-0   <none>           <none>
+frontend-74f87db87b-76l97   1/1     Running       0          2m38s   10.42.1.5   k3d-lottoti-agent-1    <none>           <none>
+frontend-74f87db87b-fg7gq   1/1     Running       0          2m38s   10.42.0.5   k3d-lottoti-agent-0    <none>           <none>
+frontend-74f87db87b-kd27s   1/1     Terminating   0          9s      10.42.2.7   k3d-lottoti-server-0   <none>           <none>
+frontend-74f87db87b-rtcnz   0/1     Completed     0          9s      10.42.1.7   k3d-lottoti-agent-1    <none>           <none>
+
+$ kubectl -n lottoti scale deploy/frontend --replicas=3
+deployment.apps/frontend scaled
+
+$ kubectl -n lottoti get pods -l app=frontend -o wide  (apres scale down)
+NAME                        READY   STATUS    RESTARTS   AGE     IP          NODE                   NOMINATED NODE   READINESS GATES
+frontend-74f87db87b-747vx   1/1     Running   0          2m44s   10.42.2.4   k3d-lottoti-server-0   <none>           <none>
+frontend-74f87db87b-76l97   1/1     Running   0          2m44s   10.42.1.5   k3d-lottoti-agent-1    <none>           <none>
+frontend-74f87db87b-fg7gq   1/1     Running   0          2m44s   10.42.0.5   k3d-lottoti-agent-0    <none>           <none>

@@ -1,0 +1,19 @@
+# =============================================================================
+# POD DISRUPTION BUDGET (PDB) - Garantie de dispo lors de drains
+# =============================================================================
+# Cas d'usage : un admin fait `kubectl drain worker1` (maintenance node).
+# Sans PDB, k8s peut tuer TOUS les backend pods en meme temps.
+# Avec PDB, k8s respecte minAvailable et evicts les pods un par un.
+# =============================================================================
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend                         # Nom du PDB
+  namespace: lottoti
+spec:
+  minAvailable: 1                       # Au minimum 1 backend doit rester up pendant les drains
+                                        # Avec replicas=2, k8s evicte 1 a la fois (jamais les 2)
+  selector:                             # Quels pods sont concernes ?
+    matchLabels:
+      app: backend                      # Tous les pods avec app=backend

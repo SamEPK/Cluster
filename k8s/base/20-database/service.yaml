@@ -1,0 +1,45 @@
+# =============================================================================
+# SERVICES Postgres - 2 services pour 2 usages
+# =============================================================================
+# Postgres tourne en StatefulSet (1 pod : postgres-0).
+# Pour y acceder, on a besoin d'un Service (DNS + load balancer).
+# Mais pour un StatefulSet, on cree 2 services :
+#   1. headless (pour le DNS individuel : postgres-0.postgres-headless...)
+#   2. classique (load balancer si plusieurs replicas)
+# =============================================================================
+---
+# === Service "headless" - obligatoire pour les StatefulSets ===
+# "headless" = pas de ClusterIP, le DNS resout directement vers les IPs des pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless               # Nom DNS prefixe : postgres-0.postgres-headless.lottoti.svc
+  namespace: lottoti
+  labels:
+    app: postgres                       # Etiquette pour grep/filtrer
+spec:
+  clusterIP: None                       # MAGIE : "None" = headless service
+  selector:                             # Selectionne les pods avec ces labels
+    app: postgres
+  ports:
+    - name: postgres                    # Nom du port (utile pour les Probes)
+      port: 5432                        # Port expose par le service
+      targetPort: 5432                  # Port du pod backend
+---
+# === Service classique (ClusterIP) - pour les apps qui se connectent ===
+# Le backend utilise "postgres" (ce service) dans sa DATABASE_URL
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres                        # DNS court : postgres.lottoti.svc.cluster.local
+  namespace: lottoti
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP                       # Default : IP virtuelle interne au cluster
+  selector:
+    app: postgres                       # Pointe vers les pods avec label app=postgres
+  ports:
+    - name: postgres
+      port: 5432                        # Le backend appelle postgres:5432
+      targetPort: 5432                  # Forward vers le port 5432 du pod

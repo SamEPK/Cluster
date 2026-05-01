@@ -1,0 +1,40 @@
+# =============================================================================
+# CERTIFICATE TLS pour lottoti.local + api.lottoti.local
+# =============================================================================
+# cert-manager va automatiquement :
+#  1. Generer une cle privee
+#  2. Demander un cert au ClusterIssuer "lottoti-ca-issuer"
+#  3. Stocker le tout dans le Secret "lottoti-tls"
+#  4. Renouveler 30j avant expiration
+# =============================================================================
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate                       # Demande de cert (CRD cert-manager)
+metadata:
+  name: lottoti-tls                     # Nom de la ressource Certificate
+  namespace: lottoti                    # Cree le Secret dans ce namespace
+spec:
+  secretName: lottoti-tls               # Nom du Secret cree (utilise dans Ingress.spec.tls)
+
+  # === Qui signe ? ===
+  issuerRef:
+    name: lottoti-ca-issuer             # Notre CA local (defini dans 15-cert-manager/)
+    kind: ClusterIssuer
+
+  # === Validite ===
+  duration: 2160h                       # 90 jours (recommande Let's Encrypt)
+  renewBefore: 720h                     # Renouvelle 30j avant expiration
+
+  # === Cle privee ===
+  privateKey:
+    algorithm: ECDSA                    # ECDSA = plus rapide et plus court que RSA
+    size: 256                           # 256 bits ECDSA = OK pour TLS
+
+  # === Identite du certificat ===
+  commonName: lottoti.local             # CN= dans le DN (deprecated mais courtois)
+
+  # === SAN : Subject Alternative Names (ce qui compte vraiment) ===
+  dnsNames:
+    - lottoti.local                     # Frontend
+    - api.lottoti.local                 # API direct
+    - "*.lottoti.local"                 # Wildcard pour sous-domaines (cdn.lottoti.local etc)

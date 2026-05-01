@@ -1,0 +1,21 @@
+==========================================
+CAPTURE 03 — Persistance (PVC + PV)
+==========================================
+
+$ kubectl -n lottoti get pvc
+NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+pgdata-postgres-0   Bound    pvc-48793dcc-d98f-4928-b119-fb1a50e77853   5Gi        RWO            local-path     <unset>                 18m
+redisdata-redis-0   Bound    pvc-319baa70-ad23-4681-8d70-3a55360fdd02   1Gi        RWO            local-path     <unset>                 18m
+uploads             Bound    pvc-74096157-c2fe-40d7-9af0-fa9cd5a09d05   5Gi        RWO            local-path     <unset>                 18m
+
+$ kubectl get pv
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                            STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+pvc-0cb1bc0f-70ef-4817-bf60-c77a6efbe220   512Mi      RWO            Delete           Bound    lottoti-helm/data-redis-0        local-path     <unset>                          13m
+pvc-2f326382-487e-483a-9763-48a38f26353f   2Gi        RWO            Delete           Bound    lottoti-helm/pgdata-postgres-0   local-path     <unset>                          13m
+pvc-319baa70-ad23-4681-8d70-3a55360fdd02   1Gi        RWO            Delete           Bound    lottoti/redisdata-redis-0        local-path     <unset>                          17m
+pvc-48793dcc-d98f-4928-b119-fb1a50e77853   5Gi        RWO            Delete           Bound    lottoti/pgdata-postgres-0        local-path     <unset>                          17m
+pvc-74096157-c2fe-40d7-9af0-fa9cd5a09d05   5Gi        RWO            Delete           Bound    lottoti/uploads                  local-path     <unset>                          17m
+
+$ kubectl get sc
+NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsumer   false                  23m

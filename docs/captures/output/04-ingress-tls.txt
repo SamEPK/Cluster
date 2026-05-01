@@ -1,0 +1,33 @@
+==========================================
+CAPTURE 04 — Ingress + TLS (vraies images)
+==========================================
+
+$ kubectl -n lottoti get ingress,certificate
+NAME                                         CLASS     HOSTS                             ADDRESS   PORTS     AGE
+ingress.networking.k8s.io/lottoti            traefik   lottoti.local,api.lottoti.local             80, 443   18m
+ingress.networking.k8s.io/lottoti-redirect   traefik   lottoti.local,api.lottoti.local             80        18m
+
+NAME                                      READY   SECRET        AGE
+certificate.cert-manager.io/lottoti-tls   True    lottoti-tls   18m
+
+$ kubectl get clusterissuer
+NAME                   READY   AGE
+lottoti-ca-issuer      True    21m
+selfsigned-bootstrap   True    21m
+
+$ kubectl -n traefik get svc
+NAME      TYPE       CLUSTER-IP   EXTERNAL-IP   PORT(S)                      AGE
+traefik   NodePort   10.43.4.83   <none>        80:30080/TCP,443:30443/TCP   22m
+
+=== Test cURL HTTPS app reelle ===
+$ curl -sk https://lottoti.local:30443/  (premiers 200 char HTML)
+HTTP_CODE: 200 | TIME: 0.067240s
+<!DOCTYPE html><!--Cxmu645qfd47BPYZ6BAnp--><html lang="fr"><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="preload" as="image" imageSrcSet=
+
+$ curl -sk https://lottoti.local:30443/api/health
+{"checks":{"database":{"response_ms":1.6,"status":"healthy"}},"status":"healthy","version":"1.0.0"}
+
+
+Cert issuer:
+subject=CN=lottoti.local
+issuer=O=LottoTi, OU=LottoTi Cluster, CN=lottoti-ca

@@ -1,0 +1,43 @@
+==========================================
+CAPTURE 07 — Persistance DB (kill, donnée survit)
+==========================================
+
+ETAPE 1: Inserer une donnee de test
+$ kubectl -n lottoti exec postgres-0 -- psql ...
+CREATE TABLE
+INSERT 0 1
+
+Donnee inseree avec marker: proof_1777283282
+
+ETAPE 2: Lire avant kill
+ id |      marker      |             ts             
+----+------------------+----------------------------
+  1 | proof_1777283282 | 2026-04-27 09:48:02.790203
+(1 row)
+
+
+ETAPE 3: PVC + UID avant kill
+pvc-64fbba8e-fa93-49f7-aeed-03138a8a8abe
+
+ETAPE 4: KILL postgres-0
+$ kubectl -n lottoti delete pod postgres-0 --grace-period=0 --force
+Warning: Immediate deletion does not wait for confirmation that the running resource has been terminated. The resource may continue to run on the cluster indefinitely.
+pod "postgres-0" force deleted from lottoti namespace
+
+Wait recovery...
+Waiting for 1 pods to be ready...
+partitioned roll out complete: 1 new pods have been updated...
+
+ETAPE 5: Verifier que la donnee EST TOUJOURS LA
+ id |      marker      |             ts             
+----+------------------+----------------------------
+  1 | proof_1777283282 | 2026-04-27 09:48:02.790203
+(1 row)
+
+
+ETAPE 6: PVC + UID apres kill (doit etre IDENTIQUE)
+pvc-64fbba8e-fa93-49f7-aeed-03138a8a8abe
+
+$ kubectl -n lottoti get pod postgres-0  (AGE doit etre faible)
+NAME         READY   STATUS    RESTARTS   AGE
+postgres-0   1/1     Running   0          13s

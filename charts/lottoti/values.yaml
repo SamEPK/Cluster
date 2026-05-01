@@ -1,0 +1,115 @@
+# =============================================================================
+# Values Helm pour LottoTi
+# Override avec --values prod-values.yaml ou --set key=value
+# =============================================================================
+
+global:
+  domain: lottoti.local
+  storageClass: longhorn
+  imageRegistry: ""               # vide = pas de prefix (images locales k3s)
+  imagePullPolicy: IfNotPresent
+
+# --- Secrets ---
+# En prod, NE PAS commit ces valeurs. Utiliser --set ou un secret externe (ESO/SealedSecrets).
+secrets:
+  # Si createSecret=true, le chart cree le Secret 'lottoti-secrets'.
+  # Sinon, on suppose qu'il a deja ete cree (par 07-deploy.sh ou manuellement).
+  createSecret: false
+  postgresPassword: ""
+  flaskSecretKey: ""
+  jwtSecretKey: ""
+  stripeSecretKey: ""
+  stripeWebhookSecret: ""
+
+# --- PostgreSQL ---
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  database: lottoit
+  user: lottoit
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  nodeSelector:
+    storage: "true"
+
+# --- Redis ---
+redis:
+  enabled: true
+  image: redis:7-alpine
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 192Mi
+
+# --- Backend Flask ---
+backend:
+  image:
+    repository: lottoti/backend
+    tag: 1.0.0
+  replicas: 2
+  port: 5000
+  uploadsStorage: 5Gi             # PVC RWX
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPU: 70
+    targetMemory: 80
+  pdb:
+    minAvailable: 1
+  env:
+    flaskEnv: production
+    logLevel: info
+    seedDb: "false"
+
+# --- Frontend Next.js ---
+frontend:
+  image:
+    repository: lottoti/frontend
+    tag: 1.0.0
+  replicas: 3
+  port: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPU: 75
+  pdb:
+    minAvailable: 2
+
+# --- Ingress + TLS ---
+ingress:
+  enabled: true
+  className: traefik
+  tls:
+    enabled: true
+    issuerRef: lottoti-ca-issuer  # ClusterIssuer cert-manager
+
+# --- NetworkPolicies ---
+networkPolicies:
+  enabled: true
+  defaultDeny: true

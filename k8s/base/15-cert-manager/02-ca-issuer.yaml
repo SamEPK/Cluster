@@ -1,0 +1,15 @@
+# =============================================================================
+# ClusterIssuer "lottoti-ca-issuer" - signe les certs des apps avec notre CA
+# =============================================================================
+# Apres avoir cree notre CA (lottoti-ca-key-pair), on en fait un Issuer.
+# C'est CET issuer qu'on utilisera dans les Certificate des apps (ex:
+# lottoti-tls). Il signe tout ce qu'on lui demande avec la cle de notre CA.
+# =============================================================================
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer                     # Cluster-wide : utilisable depuis n'importe quel namespace
+metadata:
+  name: lottoti-ca-issuer               # Nom reference dans les Certificates (issuerRef)
+spec:
+  ca:                                   # Type "CA" : signe avec une CA existante
+    secretName: lottoti-ca-key-pair     # Secret contenant cert + cle de la CA
+                                        # (cree par le Certificate "lottoti-ca")

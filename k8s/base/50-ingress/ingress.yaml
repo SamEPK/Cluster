@@ -1,0 +1,209 @@
+# =============================================================================
+# INGRESS - point d'entree HTTP(S) du cluster (remplace le nginx du Docker)
+# =============================================================================
+# 3 ressources ici :
+#   1. Ingress "lottoti" : routes HTTPS principales
+#   2. Ingress "lottoti-redirect" : HTTP -> HTTPS
+#   3. IngressRoute (CRD Traefik) : routes plus fines avec middlewares per-route
+#
+# Routes (replique du nginx.conf de l'etape Docker) :
+#   https://lottoti.local/api/health   -> backend (rate limit health)
+#   https://lottoti.local/api/auth/*   -> backend (rate limit auth strict)
+#   https://lottoti.local/api/*        -> backend (rate limit api)
+#   https://lottoti.local/socket.io/*  -> backend (WebSocket)
+#   https://lottoti.local/*            -> frontend (Next.js)
+#   https://api.lottoti.local/*        -> backend (sous-domaine direct)
+# =============================================================================
+
+---
+# === Ingress 1/3 : routes HTTPS principales ===
+apiVersion: networking.k8s.io/v1        # API standard Ingress (pas un CRD)
+kind: Ingress
+metadata:
+  name: lottoti
+  namespace: lottoti
+  annotations:                          # Configuration specifique Traefik
+    cert-manager.io/cluster-issuer: lottoti-ca-issuer    # Auto-genere le cert via cert-manager
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure   # HTTPS only (port 443)
+    traefik.ingress.kubernetes.io/router.tls: "true"     # Active TLS
+    # Middlewares globaux appliques a toutes les routes de cet Ingress
+    traefik.ingress.kubernetes.io/router.middlewares: |
+      lottoti-security-headers@kubernetescrd,
+      lottoti-compress@kubernetescrd
+spec:
+  ingressClassName: traefik             # Utilise le controller Traefik (pas nginx-ingress)
+
+  # === TLS : quel cert utiliser pour quel host ===
+  tls:
+    - hosts:
+        - lottoti.local
+        - api.lottoti.local
+      secretName: lottoti-tls           # Secret cree par cert-manager (Certificate ressource)
+
+  # === Regles de routing ===
+  rules:
+    # === Domaine principal : lottoti.local ===
+    - host: lottoti.local
+      http:
+        paths:
+          # /api/health -> backend
+          - path: /api/health
+            pathType: Prefix            # Prefix : /api/health, /api/health/, /api/healthxxx OK
+            backend:
+              service:
+                name: backend           # Service backend
+                port:
+                  number: 5000
+          # /api/auth -> backend (rate limit strict applique via IngressRoute)
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 5000
+          # /api -> backend (toutes les autres routes API)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 5000
+          # /socket.io -> backend (WebSocket Socket.IO)
+          - path: /socket.io
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 5000
+          # / -> frontend (catch-all : tout le reste va a Next.js)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000
+
+    # === Sous-domaine direct API (utile pour mobile/CLI) ===
+    - host: api.lottoti.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend           # Tout va au backend
+                port:
+                  number: 5000
+
+---
+# === Ingress 2/3 : redirige HTTP -> HTTPS (entrypoint web) ===
+# Sans ca, http://lottoti.local serait juste 404
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lottoti-redirect
+  namespace: lottoti
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web      # HTTP only (port 80)
+    traefik.ingress.kubernetes.io/router.middlewares: lottoti-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: lottoti.local
+      http:
+        paths:
+          - path: /                     # Catch-all
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend          # Service "fictif" (jamais atteint, redirect 301 avant)
+                port:
+                  number: 3000
+    - host: api.lottoti.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 5000
+
+---
+# === IngressRoute Traefik (CRD) : routing fin avec middlewares per-route ===
+# L'Ingress standard ne permet pas d'appliquer un middleware DIFFERENT
+# par route (la map d'annotations est globale). On utilise donc l'IngressRoute
+# Traefik qui le permet via la directive "middlewares" sous chaque route.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: lottoti-routes
+  namespace: lottoti
+spec:
+  entryPoints:
+    - websecure                         # HTTPS only
+
+  routes:
+    # Route /api/health avec rate limit "health" (1 req/s)
+    - kind: Rule
+      match: Host(`lottoti.local`) && PathPrefix(`/api/health`)
+      priority: 100                     # Plus la priorite est haute, plus elle gagne
+      services:
+        - name: backend
+          port: 5000
+      middlewares:
+        - name: ratelimit-health
+        - name: security-headers
+
+    # Route /api/auth avec rate limit "auth" (5 req/s anti bruteforce)
+    - kind: Rule
+      match: Host(`lottoti.local`) && PathPrefix(`/api/auth`)
+      priority: 90
+      services:
+        - name: backend
+          port: 5000
+      middlewares:
+        - name: ratelimit-auth
+        - name: security-headers
+
+    # Route /api avec rate limit "api" general (30 req/s)
+    - kind: Rule
+      match: Host(`lottoti.local`) && PathPrefix(`/api`)
+      priority: 80
+      services:
+        - name: backend
+          port: 5000
+      middlewares:
+        - name: ratelimit-api
+        - name: security-headers
+        - name: compress
+
+    # Route /socket.io WebSocket (pas de rate limit, sinon WS coupe)
+    - kind: Rule
+      match: Host(`lottoti.local`) && PathPrefix(`/socket.io`)
+      priority: 80
+      services:
+        - name: backend
+          port: 5000
+      middlewares:
+        - name: security-headers
+
+    # Catch-all : frontend Next.js (priority 1 = derniere chance)
+    - kind: Rule
+      match: Host(`lottoti.local`)
+      priority: 1
+      services:
+        - name: frontend
+          port: 3000
+      middlewares:
+        - name: security-headers
+        - name: compress
+
+  # === TLS pour cet IngressRoute ===
+  tls:
+    secretName: lottoti-tls             # Le meme cert que l'Ingress standard

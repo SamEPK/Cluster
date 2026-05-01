@@ -1,0 +1,63 @@
+# =============================================================================
+# HORIZONTAL POD AUTOSCALER (HPA) - Bonus 5 (+1 pt)
+# =============================================================================
+# Le HPA scale automatiquement le nombre de replicas selon la charge.
+# Necessite metrics-server (integre k3s par defaut depuis v1.27).
+#
+# Concretement : si CPU moyen > 70%, HPA ajoute des pods (max 8).
+# Si CPU < 70% pendant 5 min, HPA retire des pods (min 2).
+# =============================================================================
+---
+apiVersion: autoscaling/v2              # API v2 du HPA (plus puissante que v1)
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend                         # Meme nom que le Deployment cible (par convention)
+  namespace: lottoti
+  labels:
+    app: backend
+spec:
+  # === Cible : quel Deployment scaler ? ===
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend                       # Reference au Deployment "backend"
+
+  minReplicas: 2                        # Jamais moins de 2 (= exigence PDF)
+  maxReplicas: 8                        # Jamais plus de 8 (limite ressources cluster)
+
+  # === Metriques observees ===
+  metrics:
+    # Metrique 1 : CPU
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization             # En % du request (cpu: 200m = 100% si pod consomme 200m)
+          averageUtilization: 70        # Cible : 70% d'utilisation moyenne
+                                        # Si tous les pods >= 70%, scale up
+    # Metrique 2 : memoire
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80        # Cible : 80% d'utilisation memoire
+
+  # === Behavior : controle du scale up/down (anti yo-yo) ===
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # Attend 60s avant de scaler up (pour eviter les pics)
+      policies:
+        - type: Pods
+          value: 2                      # Max +2 pods par minute
+          periodSeconds: 60
+        - type: Percent
+          value: 50                     # Ou +50% par minute
+          periodSeconds: 60
+      selectPolicy: Max                 # Prend le PLUS grand des deux (+50% ou +2 pods)
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Attend 5 min avant scale down (le scale-down est plus lent)
+      policies:
+        - type: Percent
+          value: 25                     # Max -25% par minute (descente progressive)
+          periodSeconds: 60

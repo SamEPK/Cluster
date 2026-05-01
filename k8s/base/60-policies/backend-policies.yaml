@@ -1,0 +1,84 @@
+# =============================================================================
+# NETWORK POLICIES BACKEND - flux entrant + sortant autorises
+# =============================================================================
+
+---
+# === 1. INGRESS : qui peut JOINDRE le backend ? ===
+# Le backend ecoute sur 5000 et reçoit des appels :
+#   - Depuis Traefik (Ingress controller, namespace traefik) sur /api, /socket.io
+#   - Depuis le frontend (SSR Next.js qui fait des fetch internes)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-ingress
+  namespace: lottoti
+spec:
+  podSelector:                          # S'applique aux pods :
+    matchLabels:
+      app: backend                      #   avec label app=backend
+  policyTypes:
+    - Ingress                           # Reglemente le trafic ENTRANT
+  ingress:
+    - from:                             # Sources autorisees :
+        # Source 1 : tous les pods du namespace traefik
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+        # Source 2 : pods avec label app=frontend (memes ns)
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 5000                    # Sur le port 5000 (Flask/Gunicorn)
+
+---
+# === 2. EGRESS : ou le backend peut-il sortir ? ===
+# Le backend a besoin :
+#   - postgres (5432) : DATABASE_URL
+#   - redis (6379) : REDIS_URL
+#   - HTTPS externe : Stripe, Sentry, etc.
+#   - SMTP (587) : envoi d'emails
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-egress
+  namespace: lottoti
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Egress                            # Reglemente le trafic SORTANT
+  egress:
+    # === Destination 1 : Postgres ===
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres             # Pods avec label app=postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # === Destination 2 : Redis ===
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+
+    # === Destination 3 : Internet HTTPS (Stripe, Sentry, mail providers) ===
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0             # Tout l'Internet
+            except:                     # SAUF les reseaux prives (anti-SSRF)
+              - 10.0.0.0/8              # Reseau pods (10.42.x.x) et services (10.43.x.x)
+              - 172.16.0.0/12           # Range Docker
+              - 192.168.0.0/16          # Reseau LAN classique
+      ports:
+        - protocol: TCP
+          port: 443                     # HTTPS
+        - protocol: TCP
+          port: 587                     # SMTP STARTTLS (envoi d'emails)

@@ -1,0 +1,30 @@
+# =============================================================================
+# Certificate "lottoti-ca" - notre Autorite de Certification interne
+# =============================================================================
+# Ce certificat est l'AUTORITE qui va signer les certs des apps (lottoti.local).
+# C'est l'equivalent de Let's Encrypt mais en local, valable uniquement pour
+# notre cluster. Le navigateur ne le connait pas par defaut, donc warning
+# "non securise" (acceptable en interne, ou installable dans le store Windows).
+# =============================================================================
+apiVersion: cert-manager.io/v1
+kind: Certificate                       # Une demande de certificat
+metadata:
+  name: lottoti-ca                      # Nom de la ressource Certificate
+  namespace: cert-manager               # Le secret CA est cree dans ce ns
+spec:
+  isCA: true                            # IMPORTANT : ce cert peut signer d'autres certs (= il est CA)
+  commonName: lottoti-ca                # Nom commun affiche dans le navigateur
+  subject:                              # Identite officielle du cert (RFC 5280)
+    organizations:
+      - LottoTi                         # O= dans le DN
+    organizationalUnits:
+      - LottoTi Cluster                 # OU=
+  duration: 87600h                      # Validite : 10 ans (87600h = 10 * 365 * 24)
+  renewBefore: 720h                     # Renouvelle 30 jours avant expiration (720h = 30 * 24)
+  privateKey:                           # Config de la cle privee
+    algorithm: ECDSA                    # ECDSA = plus rapide et plus court que RSA
+    size: 256                           # 256 bits ECDSA = equivalent ~3072 bits RSA
+  secretName: lottoti-ca-key-pair       # Le cert + cle seront stockes dans ce Secret
+  issuerRef:                            # Qui doit signer CE certificat ?
+    name: selfsigned-bootstrap          # Notre ClusterIssuer self-signed (etape precedente)
+    kind: ClusterIssuer

@@ -1,0 +1,35 @@
+==========================================
+CAPTURE 06 — Kill pod recovery
+==========================================
+
+$ kubectl -n lottoti get pods -l app=frontend  (avant kill)
+NAME                        READY   STATUS    RESTARTS   AGE
+frontend-74f87db87b-747vx   1/1     Running   0          2m56s
+frontend-74f87db87b-76l97   1/1     Running   0          2m56s
+frontend-74f87db87b-fg7gq   1/1     Running   0          2m56s
+
+Cible: frontend-74f87db87b-747vx
+
+$ kubectl -n lottoti delete pod frontend-74f87db87b-747vx --grace-period=0 --force
+Warning: Immediate deletion does not wait for confirmation that the running resource has been terminated. The resource may continue to run on the cluster indefinitely.
+pod "frontend-74f87db87b-747vx" force deleted from lottoti namespace
+
+Wait 8s pour recovery...
+
+$ kubectl -n lottoti get pods -l app=frontend  (apres kill - regarder l'AGE du nouveau)
+NAME                        READY   STATUS    RESTARTS   AGE
+frontend-74f87db87b-76l97   1/1     Running   0          3m5s
+frontend-74f87db87b-fg7gq   1/1     Running   0          3m5s
+frontend-74f87db87b-k66vg   1/1     Running   0          8s
+
+$ kubectl -n lottoti get events --sort-by=.lastTimestamp | tail -10
+35s         Normal    SuccessfulRescale              horizontalpodautoscaler/frontend          New size: 3; reason: All metrics below target
+34s         Normal    Killing                        pod/frontend-74f87db87b-kd27s             Stopping container web
+34s         Normal    Killing                        pod/frontend-74f87db87b-rtcnz             Stopping container web
+33s         Normal    Killing                        pod/frontend-74f87db87b-25zbb             Stopping container web
+9s          Normal    Killing                        pod/frontend-74f87db87b-747vx             Stopping container web
+9s          Normal    SuccessfulCreate               replicaset/frontend-74f87db87b            Created pod: frontend-74f87db87b-k66vg
+8s          Normal    Started                        pod/frontend-74f87db87b-k66vg             Started container web
+8s          Warning   FailedPreStopHook              pod/frontend-74f87db87b-747vx             PreStopHook failed
+8s          Normal    Pulled                         pod/frontend-74f87db87b-k66vg             Container image "nginx:alpine" already present on machine
+8s          Normal    Created                        pod/frontend-74f87db87b-k66vg             Created container web

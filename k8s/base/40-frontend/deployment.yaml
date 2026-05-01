@@ -1,0 +1,118 @@
+# =============================================================================
+# DEPLOYMENT Frontend (Next.js) - 3 replicas (exigence PDF section 3.2.4)
+# =============================================================================
+# Le frontend est STATELESS : pas de session, pas de fichiers locaux.
+# Les 3 pods peuvent tourner sur 3 nodes differents et sont 100% interchangeables.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: lottoti
+  labels:
+    app: frontend
+    tier: frontend
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: lottoti
+spec:
+  replicas: 3                           # === EXIGENCE PDF : minimum 3 frontend replicas ===
+  revisionHistoryLimit: 5               # Conserve 5 ReplicaSets pour rollback
+
+  # === BONUS 4 : Rolling Update zero-downtime ===
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                       # +1 pod en plus pendant la maj (4 total)
+      maxUnavailable: 0                 # JAMAIS moins que les 3 actuels
+
+  selector:
+    matchLabels:
+      app: frontend                     # Doit matcher template.metadata.labels
+
+  template:
+    metadata:
+      labels:
+        app: frontend                   # Label utilise par Service + NetworkPolicies
+        tier: frontend
+    spec:
+      affinity:
+        # Preferer les workers labellises lottoti.io/role=app
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: lottoti.io/role
+                    operator: In
+                    values: ["app"]
+
+        # Spread sur les 3 nodes (HA contre node failure)
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: frontend       # Eviter de mettre 2 frontend sur le meme node
+                topologyKey: kubernetes.io/hostname
+
+      terminationGracePeriodSeconds: 30 # 30s de grace pour finir les requetes
+
+      containers:
+        - name: web                     # Nom du container
+          image: lottoti/frontend:1.0.0 # Image Next.js standalone (216 MB)
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 3000       # Next.js standalone server.js ecoute sur 3000
+
+          # === Variables d'environnement ===
+          env:
+            - name: NODE_ENV
+              value: production         # Optimise React/Next.js
+            - name: PORT
+              value: "3000"             # Port d'ecoute (override possible)
+            - name: NEXT_TELEMETRY_DISABLED
+              value: "1"                # Desactive la telemetrie Next.js (vie privee)
+
+          # === Resources (QoS Burstable) ===
+          resources:
+            requests:
+              cpu: 100m                 # 0.1 CPU minimum
+              memory: 192Mi             # 192 Mio reserve
+            limits:
+              cpu: 500m                 # 0.5 CPU max
+              memory: 384Mi             # 384 Mio max
+
+          # === startupProbe : tolerance pendant le boot Next.js ===
+          startupProbe:
+            httpGet:
+              path: /                   # Page d'accueil (server-rendered)
+              port: 3000
+            periodSeconds: 5
+            failureThreshold: 12        # 12 * 5s = 60s de tolerance
+
+          # === livenessProbe : redemarre si le pod ne repond plus ===
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+
+          # === readinessProbe : retire du LB si pas pret ===
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+          # === preStop : grace pour finir les requetes en cours ===
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]

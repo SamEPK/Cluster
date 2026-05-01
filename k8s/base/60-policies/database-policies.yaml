@@ -1,0 +1,57 @@
+# =============================================================================
+# NETWORK POLICIES - Postgres + Redis (acces UNIQUEMENT depuis backend)
+# =============================================================================
+# Securite forte : meme si le frontend est compromis, il NE PEUT PAS
+# joindre directement la BDD. Il doit passer par le backend (qui filtre).
+# =============================================================================
+
+---
+# === Postgres : accepte UNIQUEMENT depuis backend, sur 5432 ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-allow-backend
+  namespace: lottoti
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres                     # S'applique aux pods Postgres
+  policyTypes:
+    - Ingress                           # Trafic entrant
+    - Egress                            # Trafic sortant (lock down complet)
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend              # SEULE source autorisee : pods backend
+      ports:
+        - protocol: TCP
+          port: 5432
+  # Postgres n'a besoin que du DNS (deja autorise par "allow-dns")
+  # On declare egress: [] pour CONFIRMER que rien d'autre n'est autorise
+  egress: []                            # (= aucune destination supplementaire)
+
+---
+# === Redis : accepte UNIQUEMENT depuis backend, sur 6379 ===
+# Meme logique que Postgres
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-backend
+  namespace: lottoti
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend              # Backend uniquement
+      ports:
+        - protocol: TCP
+          port: 6379                    # Port standard Redis
+  egress: []                            # Pas d'egress (en plus du DNS deja autorise)
